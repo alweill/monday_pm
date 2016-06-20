@@ -1,0 +1,190 @@
+---
+title: "OpenHDF5"
+author: "Allie Weill"
+date: "June 20, 2016"
+output: html_document
+---
+
+## About this code
+
+```{r load-libraries}
+#load libraries
+library(raster)
+library(rhdf5)
+library(rgdal)
+```
+## Let's Open a File!!
+```{r select-file}
+f<-"../NEONdata/D17-California/TEAK/2013/spectrometer/reflectance/Subset3NIS1_20130614_100459_atmcor.h5"
+# view h5 structure
+h5ls(f)
+```
+## Import Spatial Information
+```{r import-spatial-info}
+# import spatial info
+mapInfo <- h5read(f,
+                  "map info", 
+                  read.attributes = TRUE)
+mapInfo
+```
+## Grab Reflectance Materials
+```{r get-refl-materials}
+## read in reflectance data attributes
+
+reflInfo <- h5readAttributes(file = f, 
+                             name = "Reflectance")
+## define scale factor
+scaleFactor <- reflInfo$`Scale Factor`
+
+## define no data value
+noDataValue <- as.numeric(reflInfo$`data ignore value`)
+str(noDataValue)
+
+```
+
+## Import Data Dims
+```{r import-dims}
+# Open the file for viewing
+fid <- H5Fopen(f)
+# open the reflectance data
+did <- H5Dopen(fid, "Reflectance")
+# grab the dataset dimensions (column, row, band)
+sid <- H5Dget_space(did)
+dims <- H5Sget_simple_extent_dims(sid)$size
+dims
+# close all open connections
+H5Sclose(sid)
+H5Dclose(did)
+H5Fclose(fid)
+
+```
+
+## Read in Reflectance Data
+```{r read-data}
+# extract slce of H5 file
+b56 <-  h5read(f,
+               "Reflectance",
+               index = list(1:dims[1],1:dims[2],56))
+```
+## Convert to Matrix
+```{r convert-matrix}
+# convert to matrix
+b56 <- b56[,,1]
+```
+## Plot Data
+```{r plot-data}
+## let's plot some data
+
+## first change from scientific notation to decimals
+options("scipen"=100, "digits"=4)
+
+## now try an image
+image(b56)
+
+## log transform it--too dark, can't see well otherwise
+image(log(b56),main="log transformed data")
+
+## histogram
+hist(b56,
+     col="springgreen",
+     main="Distribution of Reflectance Values \nBand 56")
+```
+## Data Clean Up
+```{r data-clean-up}
+# assign no data value to object (already created noDataValue earlier)
+# set all reflectance values = 15,000 to NA
+b56[b56 == noDataValue] <- NA
+
+# apply scale factor (created earlier)
+# reflectance values between 0-1 (the valid range)
+b56 <- b56/scaleFactor
+
+# view distribution of reflectance values
+hist(b56,
+     main="Distribution with NoData Value Considered\nData Scaled")
+```
+
+## Transposing (flipping) the data
+```{r transpose-data}
+# Because the data import as column, row but we require row, column in R, we need to transpose x and y values in order for our final image to plot properly
+b56 <- t(b56)
+image (log (b56), 
+      main="Band 56\nTransposed Values")
+```
+## Define spatial extent
+```{r define-spatial-extent}
+# We can extract the upper left-hand corner coordinates.
+# the numbers as position 4 and 5 are the UPPER LEFT CORNER (x,y)
+mapInfo <- strsplit(mapInfo, ",")
+mapInfo <- unlist(mapInfo)
+mapInfo
+# grab the X,Y left corner coordinate ensure the format is numeric with as.numeric()
+xMin <- as.numeric(mapInfo[4])
+yMax <- as.numeric(mapInfo[5])
+
+# we can get the x and y resolution from this string too
+res <- c(mapInfo[2],mapInfo[3])
+res <- as.numeric(res)
+
+# finally calculate the xMax value and the yMin value from the dimensions
+# we grabbed above. The xMax is the left corner + number of columns* resolution.
+xMax <- xMin + (dims[1]*res[1])
+yMin <- yMax - (dims[2]*res[2])
+
+# also note that x and y res are the same (1 meter) Now, define the raster extent define the extent (left, right, top, bottom)
+rasExt <- extent(xMin, xMax,yMin,yMax)
+
+# now we can create a raster and assign it its spatial extent
+## CRS is a coordinate reference system
+b56r <- raster(b56,
+               crs=CRS("+init=epsg:32611"))
+# assign CRS
+extent(b56r) <- rasExt
+
+# view raster object attributes
+b56r
+
+# plot the new image
+plot(b56r, main="Raster for Lower Teakettle \nBand 56")
+
+```
+
+## Import NEON Functions
+```{r import-using-functions}
+library(devtools)
+#install_github("lwasser/neon-aop-package/neonAOP")
+library(neonAOP)
+??read_band
+??open_band
+
+b55 <- open_band(f, 
+                 band = 55,
+                 epsg = 32611)
+b55
+## plot data
+plot(b55, main="Raster for Lower Teakettle Band 55")
+
+# import several bands
+bands <- c(58, 34, 19)
+
+## create a raster stack
+RGBstack <- create_stack(f, 
+                         bands = bands, 
+                         epsg = 32611)
+plot(RGBstack)
+# plot RGB stack
+plotRGB(RGBstack,
+        stretch="lin")
+
+#cir image
+bandsCIR <- c(90, 34, 19)
+## create a raster stack
+CIRstack <- create_stack(f, 
+                         bands = bandsCIR, 
+                         epsg = 32611)
+plot(CIRstack)
+# plot RGB stack
+plotRGB(CIRstack,
+        stretch="lin")
+```
+
