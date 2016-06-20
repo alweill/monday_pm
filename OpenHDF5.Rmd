@@ -4,6 +4,7 @@ author: "Allie Weill"
 date: "June 20, 2016"
 output: html_document
 ---
+This is a new sentence.
 
 ## About this code
 
